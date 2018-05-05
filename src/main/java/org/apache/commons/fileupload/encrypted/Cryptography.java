@@ -1,3 +1,19 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.commons.fileupload.encrypted;
 
 import javax.crypto.*;
@@ -10,8 +26,14 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
+/**
+ * Provides cryptographic operations for this package.
+ *
+ * This code is based on the Cryptolite library: https://github.com/davidcarboni/cryptolite-java
+ *
+ * @since FileUpload 1.4
+ */
 public class Cryptography {
-
 
 
     /**
@@ -56,6 +78,8 @@ public class Cryptography {
      */
     public static final String RANDOM_ALGORITHM = "SHA1PRNG";
 
+    private static int initialisationVectorSize = -1;
+
     /**
      * This method wraps the destination {@link OutputStream} with a
      * {@link CipherOutputStream}.
@@ -79,8 +103,8 @@ public class Cryptography {
      *                    {@link CipherOutputStream}.
      * @return A {@link CipherOutputStream}, which wraps the given
      * {@link OutputStream}.
-     * @throws IOException If an error occurs in writing the initialisation vector to
-     * the destination stream.
+     * @throws IOException              If an error occurs in writing the initialisation vector to
+     *                                  the destination stream.
      * @throws IllegalArgumentException If the given key is not a valid {@value #CIPHER_ALGORITHM} key.
      * @see #decrypt(InputStream, SecretKey)
      */
@@ -119,7 +143,7 @@ public class Cryptography {
      * have added these to the start of the underlying data automatically.
      *
      * @param input The source {@link InputStream}, containing encrypted data.
-     * @param key    The key to be used for decryption.
+     * @param key   The key to be used for decryption.
      * @return A {@link CipherInputStream}, which wraps the given source stream
      * and will decrypt the data as they are read.
      * @throws IOException              If an error occurs in reading the initialisation vector from
@@ -145,11 +169,42 @@ public class Cryptography {
 
 
     /**
-     * Generates a new secret (also known as symmetric) key for use with {@value CIPHER_ALGORITHM}.
+     * Decrypts the given bytes and returns the data as a byte array.
+     *
+     * @param input The encrypted data.
+     * @param key   The key to use for decryption.
+     * @return The decrypted data as a byte array.
+     * @see #decrypt(InputStream, SecretKey)
+     */
+    public static byte[] decrypt(byte[] input, SecretKey key) {
+
+        // Split the input into IV and data
+        byte[] iv = new byte[IninialisationVectorSize()];
+        System.arraycopy(input, 0, iv, 0, iv.length);
+        byte[] data = new byte[input.length - iv.length];
+        System.arraycopy(input, iv.length, data, 0, data.length);
+
+        // Initialise a cipher instance
+        Cipher cipher = getCipher();
+        initCipher(cipher, Cipher.DECRYPT_MODE, key, iv);
+
+        // Decrypt the data:
+        try {
+            return cipher.doFinal(data);
+        } catch (IllegalBlockSizeException e) {
+            throw new IllegalStateException("Block-size exception when completing byte decryption.", e);
+        } catch (BadPaddingException e) {
+            throw new IllegalStateException("Padding error detected when completing byte decryption.", e);
+        }
+    }
+
+
+    /**
+     * Generates a new {@value CIPHER_ALGORITHM} encryption key.
      * <p>
      * The key size is determined by {@link #KEY_SIZE}.
      *
-     * @return A new, randomly generated secret key.
+     * @return A new, randomly generated key.
      */
     public static SecretKey generateKey() {
 
@@ -159,8 +214,8 @@ public class Cryptography {
             keyGenerator.init(KEY_SIZE);
             return keyGenerator.generateKey();
         } catch (NoSuchAlgorithmException e) {
-                throw new IllegalStateException("Required algorithm unavailable in this JVM: "
-                        + CIPHER_ALGORITHM, e);
+            throw new IllegalStateException("Required algorithm unavailable in this JVM: "
+                    + CIPHER_ALGORITHM, e);
         }
     }
 
@@ -170,12 +225,12 @@ public class Cryptography {
      * <p>
      * This step has been extracted into a method because the exception handling makes it
      * harder to read the encrypt/decrypt methods.
-     * @return A {@link Cipher} instance for {@value JCE_CIPHER_NAME}.
      *
      * @param cipher The {@link Cipher} instance.
-     * @param mode One of {@link Cipher#ENCRYPT_MODE} or {@link Cipher#DECRYPT_MODE}.
-     * @param key The encryption key.
-     * @param iv The initialisation vector.
+     * @param mode   One of {@link Cipher#ENCRYPT_MODE} or {@link Cipher#DECRYPT_MODE}.
+     * @param key    The encryption key.
+     * @param iv     The initialisation vector.
+     * @return A {@link Cipher} instance for {@value JCE_CIPHER_NAME}.
      */
     private static void initCipher(Cipher cipher, int mode, SecretKey key, byte[] iv) {
         // NB the exceptions below should never be thrown if this is
@@ -201,6 +256,7 @@ public class Cryptography {
      * <p>
      * This step has been extracted into a method because the exception handling makes it
      * harder to read the encrypt/decrypt methods.
+     *
      * @return A {@link Cipher} instance for {@value JCE_CIPHER_NAME}.
      */
     private static Cipher getCipher() {
@@ -234,10 +290,9 @@ public class Cryptography {
             throw new IllegalArgumentException("Unable to generate bytes using SecureRandom algorithm: "
                     + RANDOM_ALGORITHM);
         }
-        int ivSize = cipher.getBlockSize();
-        byte[] bytes = new byte[ivSize];
-        secureRandom.nextBytes(bytes);
-        return bytes;
+        byte[] iv = new byte[cipher.getBlockSize()];
+        secureRandom.nextBytes(iv);
+        return iv;
     }
 
 
@@ -250,13 +305,19 @@ public class Cryptography {
      * given {@link Cipher}, containing random bytes.
      */
     private static byte[] readInitialisationVector(Cipher cipher, InputStream source) throws IOException {
-        int ivSize = cipher.getBlockSize();
-        byte[] bytes = new byte[ivSize];
+        byte[] iv = new byte[cipher.getBlockSize()];
         int read = 0;
-        while (read < bytes.length) {
-            read += source.read(bytes, read, bytes.length - read);
+        while (read < iv.length) {
+            read += source.read(iv, read, iv.length - read);
         }
-        return bytes;
+        return iv;
+    }
+
+    public static int IninialisationVectorSize() {
+        if (initialisationVectorSize < 0) {
+            initialisationVectorSize = getCipher().getBlockSize();
+        }
+        return initialisationVectorSize;
     }
 
 }
