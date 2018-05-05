@@ -1,4 +1,34 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.commons.fileupload.encrypted;
+
+import static java.lang.String.format;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileItemHeaders;
@@ -6,19 +36,41 @@ import org.apache.commons.fileupload.FileUploadException;
 import org.apache.commons.fileupload.ParameterParser;
 import org.apache.commons.fileupload.util.Streams;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.DeferredFileOutputStream;
 
 import javax.crypto.SecretKey;
-import java.io.*;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static java.lang.String.format;
 
 /**
- * This class encrypts uploaded data if they are written to disk.
+ * <p> An implementation of the
+ * {@link org.apache.commons.fileupload.FileItem FileItem} interface
+ * providing transparent encryption of uploaded data.
  *
- * Based on {@code org.apache.commons.fileupload.disk.DiskFileItem} 1643123 2014-12-03 14:10:11Z tn $ - {@code commons-fileupload 1.4-SNAPSHOT}.
+ * <p> After retrieving an instance of this class from a {@link
+ * EncryptedFileItemFactory} instance (see
+ * {@link org.apache.commons.fileupload.servlet.ServletFileUpload
+ * #parseRequest(javax.servlet.http.HttpServletRequest)}), you may
+ * either request all contents of file at once using {@link #get()} or
+ * request an {@link java.io.InputStream InputStream} with
+ * {@link #getInputStream()} and process the file without attempting to load
+ * it into memory, which may come handy with large files.
+ *
+ * <p>Temporary files, which are created for file items, should be
+ * deleted later on. The best way to do this is using a
+ * {@link org.apache.commons.io.FileCleaningTracker}, which you can set on the
+ * {@link EncryptedFileItemFactory}. However, if you do use such a tracker,
+ * then you must consider the following: Temporary files are automatically
+ * deleted as soon as they are no longer needed. (More precisely, when the
+ * corresponding instance of {@link java.io.File} is garbage collected.)
+ * This is done by the so-called reaper thread, which is started and stopped
+ * automatically by the {@link org.apache.commons.io.FileCleaningTracker} when
+ * there are files to be tracked.
+ * It might make sense to terminate that thread, for example, if
+ * your web application ends. See the section on "Resource cleanup"
+ * in the users guide of commons-fileupload.</p>
+ *
+ * @see {@code org.apache.commons.fileupload.disk.DiskFileItem}
+ *
+ * @since FileUpload 1.4
  */
 public class EncryptedFileItem
         implements FileItem {
@@ -92,7 +144,7 @@ public class EncryptedFileItem
     /**
      * Output stream for this item.
      */
-    private transient EncryptedDeferredOutputStream dfos;
+    private transient DeferredFileOutputStream dfos;
 
     /**
      * The temporary file to use.
@@ -105,15 +157,15 @@ public class EncryptedFileItem
     private FileItemHeaders headers;
 
     /**
-     * Encryption key
-     */
-    private final SecretKey key;
-
-    /**
      * Default content charset to be used when no explicit charset
      * parameter is provided by the sender.
      */
     private String defaultCharset = DEFAULT_CHARSET;
+
+    /**
+     * Encryption key
+     */
+    private final SecretKey key;
 
     // ----------------------------------------------------------- Constructors
 
@@ -166,7 +218,7 @@ public class EncryptedFileItem
         if (cachedContent == null) {
             cachedContent = dfos.getData();
         }
-        return new ByteArrayInputStream(cachedContent);
+        return Cryptography.decrypt(new ByteArrayInputStream(cachedContent), key);
     }
 
     /**
@@ -230,16 +282,16 @@ public class EncryptedFileItem
      * @return The size of the file, in bytes.
      */
     public long getSize() {
+        // NB the data in the DeferredOutputStream will be
+        // longer because of the initialisation vector:
         if (size >= 0) {
             return size;
         } else if (cachedContent != null) {
-            return cachedContent.length;
+            return cachedContent.length - Cryptography.IninialisationVectorSize();
         } else if (dfos.isInMemory()) {
-            return dfos.getData().length;
+            return dfos.getData().length - Cryptography.IninialisationVectorSize();
         } else {
-            // Use the count of bytes written, rather than the file size (as DiskFileItem does)
-            // because encrypted file size will differ from cleartext size:
-            return dfos.getByteCount();
+            return dfos.getFile().length() - Cryptography.IninialisationVectorSize();
         }
     }
 
@@ -256,7 +308,7 @@ public class EncryptedFileItem
             if (cachedContent == null && dfos != null) {
                 cachedContent = dfos.getData();
             }
-            return cachedContent;
+            return Cryptography.decrypt(cachedContent, key);
         }
 
         byte[] fileData = new byte[(int) getSize()];
@@ -347,11 +399,11 @@ public class EncryptedFileItem
             File outputFile = getStoreLocation();
             if (outputFile != null) {
                 // Save the length of the file
-                size = outputFile.length();
+                size = outputFile.length() - Cryptography.IninialisationVectorSize();
                 /*
-                 * The uploaded file is encrypted on disk
-                 * in a temporary location so must be decrypted
-                 * into the desired file.
+                 * The uploaded file is being stored encrypted on disk
+                 * in a temporary location so must be decrypted into the
+                 * desired file.
                  */
                 InputStream in = null;
                 OutputStream out = null;
@@ -455,7 +507,7 @@ public class EncryptedFileItem
             throws IOException {
         if (dfos == null) {
             File outputFile = getTempFile();
-            dfos = new EncryptedDeferredOutputStream(sizeThreshold, outputFile, key);
+            dfos = new DeferredFileOutputStream(sizeThreshold, outputFile);
         }
         return dfos;
     }
@@ -471,11 +523,16 @@ public class EncryptedFileItem
      * move the file to new location without copying the data, if the
      * source and destination locations reside within the same logical
      * volume.
+     * <p>
+     * NB the returned file is the raw, encrypted file, so the EncryptedFileItem
+     * implemetation differs from the DiskFileItem implementation by making this
+     * method protected. This enables subclasses to access it, whilst avoiding
+     * unintended usage via the public API.
      *
      * @return The data file, or <code>null</code> if the data is stored in
      * memory.
      */
-    public File getStoreLocation() {
+    protected File getStoreLocation() {
         if (dfos == null) {
             return null;
         }
