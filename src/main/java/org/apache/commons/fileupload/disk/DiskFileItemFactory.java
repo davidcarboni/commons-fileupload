@@ -42,7 +42,11 @@ import org.apache.commons.io.FileCleaningTracker;
  * <b>NOTE</b>: Files are created in the system default temp directory with
  * predictable names. This means that a local attacker with write access to that
  * directory can perform a TOUTOC attack to replace any uploaded file with a
- * file of the attackers choice. The implications of this will depend on how the
+ * file of the attackers choice. The attack is limited because data are encrypted,
+ * however bear in mind that AES encryption is "malleable" (see
+ * <a href="https://en.wikipedia.org/wiki/Malleability_(cryptography)">
+ *     https://en.wikipedia.org/wiki/Malleability_(cryptography)</a>) so there
+ * will always be a level of risk. The implications of this will depend on how the
  * uploaded file is used but could be significant. When using this
  * implementation in an environment with local, untrusted users,
  * {@link #setRepository(File)} MUST be used to configure a repository location
