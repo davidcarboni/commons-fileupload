@@ -67,4 +67,15 @@ public class DefaultFileItem
                 repository);
     }
 
+    /**
+     * This override increases the visibility of this method so that the store
+     * location can be verified in tests.
+     *
+     * @return The data file, or <code>null</code> if the data is stored in
+     *         memory.
+     */
+    public File getStoreLocation() {
+       return super.getStoreLocation();
+    }
+
 }
