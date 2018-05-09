@@ -299,7 +299,7 @@ public class DiskFileItem
             return cachedContent;
         }
 
-        byte[] fileData = new byte[(int) getSize()];
+        byte[] fileData = new byte[(int) dfos.getFile().length()];
         InputStream fis = null;
 
         try {
@@ -556,6 +556,16 @@ public class DiskFileItem
             tempFile = new File(tempDir, tempFileName);
         }
         return tempFile;
+    }
+
+    /**
+     * Provides access to clear {@link #cachedContent} for subclasses.
+     * This is used by
+     * {@link org.apache.commons.fileupload.encrypted.EncryptedFileItem EncryptedFileItem}
+     * to override {@link #delete()}.
+     */
+    protected void clearCachedContent() {
+        this.cachedContent = null;
     }
 
     // -------------------------------------------------------- Private methods
