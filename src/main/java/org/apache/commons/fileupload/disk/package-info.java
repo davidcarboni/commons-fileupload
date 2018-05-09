@@ -24,6 +24,10 @@
  *      configurable, as is the location of files that are written to disk.
  *    </p>
  *    <p>
+ *      Data are transparently encrypted so that, if they are written to disk,
+ *      there is a reduced risk of compromise.
+ *    </p>
+ *    <p>
  *      In typical usage, an instance of
  *      {@link org.apache.commons.fileupload.disk.DiskFileItemFactory DiskFileItemFactory}
  *      would be created, configured, and then passed to a
