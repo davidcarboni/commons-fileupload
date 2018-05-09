@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
 
+import org.apache.commons.fileupload.disk.Cryptography;
 import org.junit.Test;
 
 /**
@@ -188,7 +189,8 @@ public class DefaultFileItemTest {
         File storeLocation = dfi.getStoreLocation();
         assertNotNull(storeLocation);
         assertTrue(storeLocation.exists());
-        assertEquals(storeLocation.length(), testFieldValueBytes.length);
+        long decryptedLength = storeLocation.length() - Cryptography.IninialisationVectorSize();
+        assertEquals(decryptedLength, testFieldValueBytes.length);
 
         if (repository != null) {
             assertEquals(storeLocation.getParentFile(), repository);

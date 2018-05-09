@@ -184,7 +184,9 @@ public class DiskFileItem
         this.contentType = contentType;
         this.isFormField = isFormField;
         this.fileName = fileName;
-        this.sizeThreshold = sizeThreshold;
+        // Set the size threshold based on plaintext data.
+        // That means adding space for the encryption initialisation vector:
+        this.sizeThreshold = sizeThreshold + Cryptography.IninialisationVectorSize();
         this.repository = repository;
         this.key = Cryptography.generateKey();
     }
@@ -300,7 +302,7 @@ public class DiskFileItem
             return Cryptography.decrypt(cachedContent, key);
         }
 
-        byte[] fileData = new byte[(int) dfos.getFile().length()];
+        byte[] fileData = new byte[(int) dfos.getFile().length() - Cryptography.IninialisationVectorSize()];
         InputStream fis = null;
 
         try {
