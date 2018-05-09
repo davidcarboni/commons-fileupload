@@ -34,9 +34,7 @@ import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileItemHeaders;
 import org.apache.commons.fileupload.FileUploadException;
 import org.apache.commons.fileupload.ParameterParser;
-import org.apache.commons.fileupload.encrypted.Cryptography;
 import org.apache.commons.fileupload.util.Streams;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.output.DeferredFileOutputStream;
 
