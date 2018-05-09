@@ -34,10 +34,13 @@ import org.apache.commons.fileupload.FileItem;
 import org.apache.commons.fileupload.FileItemHeaders;
 import org.apache.commons.fileupload.FileUploadException;
 import org.apache.commons.fileupload.ParameterParser;
+import org.apache.commons.fileupload.encrypted.Cryptography;
 import org.apache.commons.fileupload.util.Streams;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.output.DeferredFileOutputStream;
+
+import javax.crypto.SecretKey;
 
 /**
  * <p> The default implementation of the
@@ -115,12 +118,6 @@ public class DiskFileItem
      */
     private final String fileName;
 
-    /**
-     * The size of the item, in bytes. This is used to cache the size when a
-     * file item is moved from its original location.
-     */
-    private long size = -1;
-
 
     /**
      * The threshold above which uploads will be stored on disk.
@@ -158,6 +155,11 @@ public class DiskFileItem
      */
     private String defaultCharset = DEFAULT_CHARSET;
 
+    /**
+     * Encryption key
+     */
+    private final SecretKey key;
+
     // ----------------------------------------------------------- Constructors
 
     /**
@@ -186,6 +188,7 @@ public class DiskFileItem
         this.fileName = fileName;
         this.sizeThreshold = sizeThreshold;
         this.repository = repository;
+        this.key = Cryptography.generateKey();
     }
 
     // ------------------------------- Methods from javax.activation.DataSource
@@ -202,13 +205,13 @@ public class DiskFileItem
     public InputStream getInputStream()
         throws IOException {
         if (!isInMemory()) {
-            return new FileInputStream(dfos.getFile());
+            return Cryptography.decrypt(new FileInputStream(dfos.getFile()), key);
         }
 
         if (cachedContent == null) {
             cachedContent = dfos.getData();
         }
-        return new ByteArrayInputStream(cachedContent);
+        return Cryptography.decrypt(new ByteArrayInputStream(cachedContent), key);
     }
 
     /**
@@ -272,15 +275,15 @@ public class DiskFileItem
      * @return The size of the file, in bytes.
      */
     public long getSize() {
-        if (size >= 0) {
-            return size;
-        } else if (cachedContent != null) {
-            return cachedContent.length;
+        long encryptedSize;
+        if (cachedContent != null) {
+            encryptedSize = cachedContent.length;
         } else if (dfos.isInMemory()) {
-            return dfos.getData().length;
+            encryptedSize = dfos.getData().length;
         } else {
-            return dfos.getFile().length();
+            encryptedSize = dfos.getFile().length();
         }
+        return encryptedSize - Cryptography.IninialisationVectorSize();
     }
 
     /**
@@ -296,14 +299,14 @@ public class DiskFileItem
             if (cachedContent == null && dfos != null) {
                 cachedContent = dfos.getData();
             }
-            return cachedContent;
+            return Cryptography.decrypt(cachedContent, key);
         }
 
-        byte[] fileData = new byte[(int) getSize()];
+        byte[] fileData = new byte[(int) dfos.getFile().length()];
         InputStream fis = null;
 
         try {
-            fis = new FileInputStream(dfos.getFile());
+            fis = Cryptography.decrypt(new FileInputStream(dfos.getFile()), key);
             IOUtils.readFully(fis, fileData);
         } catch (IOException e) {
             fileData = null;
@@ -386,14 +389,21 @@ public class DiskFileItem
         } else {
             File outputFile = getStoreLocation();
             if (outputFile != null) {
-                // Save the length of the file
-                size = outputFile.length();
                 /*
-                 * The uploaded file is being stored on disk
-                 * in a temporary location so move it to the
+                 * The uploaded file is being stored encrypted on disk
+                 * in a temporary location so must be decrypted into the
                  * desired file.
                  */
-                FileUtils.moveFile(outputFile, file);
+                InputStream in = null;
+                OutputStream out = null;
+                try {
+                    in = getInputStream();
+                    out = new FileOutputStream(file);
+                    IOUtils.copy(in, out);
+                } finally {
+                    IOUtils.closeQuietly(in);
+                    IOUtils.closeQuietly(out);
+                }
             } else {
                 /*
                  * For whatever reason we cannot write the
@@ -488,7 +498,7 @@ public class DiskFileItem
             File outputFile = getTempFile();
             dfos = new DeferredFileOutputStream(sizeThreshold, outputFile);
         }
-        return dfos;
+        return Cryptography.encrypt(dfos, key);
     }
 
     // --------------------------------------------------------- Public methods
@@ -497,16 +507,18 @@ public class DiskFileItem
      * Returns the {@link java.io.File} object for the <code>FileItem</code>'s
      * data's temporary location on the disk. Note that for
      * <code>FileItem</code>s that have their data stored in memory,
-     * this method will return <code>null</code>. When handling large
-     * files, you can use {@link java.io.File#renameTo(java.io.File)} to
-     * move the file to new location without copying the data, if the
-     * source and destination locations reside within the same logical
-     * volume.
+     * this method will return <code>null</code>.
+     *
+     * NB: the visibility of this method is now <code>protected</code> to avoid
+     * unexpected results. The file is encrypted on disk, so the previously valid
+     * approach of using {@link java.io.File#renameTo(java.io.File)} is no
+     * longer useful. You will need to use {@link #getInputStream()} to be
+     * able to read decrypted data.
      *
      * @return The data file, or <code>null</code> if the data is stored in
      *         memory.
      */
-    public File getStoreLocation() {
+    protected File getStoreLocation() {
         if (dfos == null) {
             return null;
         }
