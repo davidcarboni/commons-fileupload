@@ -303,7 +303,7 @@ public class DiskFileItem
             return Cryptography.decrypt(cachedContent, key);
         }
 
-        byte[] fileData = new byte[(int) dfos.getFile().length() - Cryptography.IninialisationVectorSize()];
+        byte[] fileData = new byte[(int) getSize()];
         InputStream fis = null;
 
         try {
