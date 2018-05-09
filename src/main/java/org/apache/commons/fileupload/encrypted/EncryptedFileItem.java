@@ -18,25 +18,14 @@ package org.apache.commons.fileupload.encrypted;
 
 import static java.lang.String.format;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.commons.fileupload.FileItem;
-import org.apache.commons.fileupload.FileItemHeaders;
-import org.apache.commons.fileupload.FileUploadException;
-import org.apache.commons.fileupload.ParameterParser;
-import org.apache.commons.fileupload.util.Streams;
+import org.apache.commons.fileupload.disk.DiskFileItem;
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.output.DeferredFileOutputStream;
 
 import javax.crypto.SecretKey;
 
@@ -73,94 +62,9 @@ import javax.crypto.SecretKey;
  * @since FileUpload 1.4
  */
 public class EncryptedFileItem
-        implements FileItem {
+        extends
+        DiskFileItem {
 
-    // ----------------------------------------------------- Manifest constants
-
-    /**
-     * Default content charset to be used when no explicit charset
-     * parameter is provided by the sender. Media subtypes of the
-     * "text" type are defined to have a default charset value of
-     * "ISO-8859-1" when received via HTTP.
-     */
-    public static final String DEFAULT_CHARSET = "ISO-8859-1";
-
-    // ----------------------------------------------------------- Data members
-
-    /**
-     * UID used in unique file name generation.
-     */
-    private static final String UID =
-            UUID.randomUUID().toString().replace('-', '_');
-
-    /**
-     * Counter used in unique identifier generation.
-     */
-    private static final AtomicInteger COUNTER = new AtomicInteger(0);
-
-    /**
-     * The name of the form field as provided by the browser.
-     */
-    private String fieldName;
-
-    /**
-     * The content type passed by the browser, or <code>null</code> if
-     * not defined.
-     */
-    private final String contentType;
-
-    /**
-     * Whether or not this item is a simple form field.
-     */
-    private boolean isFormField;
-
-    /**
-     * The original filename in the user's filesystem.
-     */
-    private final String fileName;
-
-    /**
-     * The size of the item, in bytes. This is used to cache the size when a
-     * file item is moved from its original location.
-     */
-    private long size = -1;
-
-
-    /**
-     * The threshold above which uploads will be stored on disk.
-     */
-    private final int sizeThreshold;
-
-    /**
-     * The directory in which uploaded files will be stored, if stored on disk.
-     */
-    private final File repository;
-
-    /**
-     * Cached contents of the file.
-     */
-    private byte[] cachedContent;
-
-    /**
-     * Output stream for this item.
-     */
-    private transient DeferredFileOutputStream dfos;
-
-    /**
-     * The temporary file to use.
-     */
-    private transient File tempFile;
-
-    /**
-     * The file items headers.
-     */
-    private FileItemHeaders headers;
-
-    /**
-     * Default content charset to be used when no explicit charset
-     * parameter is provided by the sender.
-     */
-    private String defaultCharset = DEFAULT_CHARSET;
 
     /**
      * Encryption key
@@ -189,12 +93,7 @@ public class EncryptedFileItem
     public EncryptedFileItem(String fieldName,
                              String contentType, boolean isFormField, String fileName,
                              int sizeThreshold, File repository) {
-        this.fieldName = fieldName;
-        this.contentType = contentType;
-        this.isFormField = isFormField;
-        this.fileName = fileName;
-        this.sizeThreshold = sizeThreshold;
-        this.repository = repository;
+        super(fieldName, contentType, isFormField, fileName, sizeThreshold, repository);
         this.key = Cryptography.generateKey();
     }
 
@@ -211,69 +110,7 @@ public class EncryptedFileItem
      */
     public InputStream getInputStream()
             throws IOException {
-        if (!isInMemory()) {
-            return Cryptography.decrypt(new FileInputStream(dfos.getFile()), key);
-        }
-
-        if (cachedContent == null) {
-            cachedContent = dfos.getData();
-        }
-        return Cryptography.decrypt(new ByteArrayInputStream(cachedContent), key);
-    }
-
-    /**
-     * Returns the content type passed by the agent or <code>null</code> if
-     * not defined.
-     *
-     * @return The content type passed by the agent or <code>null</code> if
-     * not defined.
-     */
-    public String getContentType() {
-        return contentType;
-    }
-
-    /**
-     * Returns the content charset passed by the agent or <code>null</code> if
-     * not defined.
-     *
-     * @return The content charset passed by the agent or <code>null</code> if
-     * not defined.
-     */
-    public String getCharSet() {
-        ParameterParser parser = new ParameterParser();
-        parser.setLowerCaseNames(true);
-        // Parameter parser can handle null input
-        Map<String, String> params = parser.parse(getContentType(), ';');
-        return params.get("charset");
-    }
-
-    /**
-     * Returns the original filename in the client's filesystem.
-     *
-     * @return The original filename in the client's filesystem.
-     * @throws org.apache.commons.fileupload.InvalidFileNameException The file name contains a NUL character,
-     *                                                                which might be an indicator of a security attack. If you intend to
-     *                                                                use the file name anyways, catch the exception and use
-     *                                                                {@link org.apache.commons.fileupload.InvalidFileNameException#getName()}.
-     */
-    public String getName() {
-        return Streams.checkFileName(fileName);
-    }
-
-    // ------------------------------------------------------- FileItem methods
-
-    /**
-     * Provides a hint as to whether or not the file contents will be read
-     * from memory.
-     *
-     * @return <code>true</code> if the file contents will be read
-     * from memory; <code>false</code> otherwise.
-     */
-    public boolean isInMemory() {
-        if (cachedContent != null) {
-            return true;
-        }
-        return dfos.isInMemory();
+        return Cryptography.decrypt(super.getInputStream(), key);
     }
 
     /**
@@ -284,15 +121,7 @@ public class EncryptedFileItem
     public long getSize() {
         // NB the data in the DeferredOutputStream will be
         // longer because of the initialisation vector:
-        if (size >= 0) {
-            return size;
-        } else if (cachedContent != null) {
-            return cachedContent.length - Cryptography.IninialisationVectorSize();
-        } else if (dfos.isInMemory()) {
-            return dfos.getData().length - Cryptography.IninialisationVectorSize();
-        } else {
-            return dfos.getFile().length() - Cryptography.IninialisationVectorSize();
-        }
+        return super.getSize() - Cryptography.IninialisationVectorSize();
     }
 
     /**
@@ -304,65 +133,7 @@ public class EncryptedFileItem
      * or {@code null} if the data cannot be read
      */
     public byte[] get() {
-        if (isInMemory()) {
-            if (cachedContent == null && dfos != null) {
-                cachedContent = dfos.getData();
-            }
-            return Cryptography.decrypt(cachedContent, key);
-        }
-
-        byte[] fileData = new byte[(int) getSize()];
-        InputStream fis = null;
-
-        try {
-            fis = Cryptography.decrypt(new FileInputStream(dfos.getFile()), key);
-            IOUtils.readFully(fis, fileData);
-        } catch (IOException e) {
-            fileData = null;
-        } finally {
-            IOUtils.closeQuietly(fis);
-        }
-
-        return fileData;
-    }
-
-    /**
-     * Returns the contents of the file as a String, using the specified
-     * encoding.  This method uses {@link #get()} to retrieve the
-     * contents of the file.
-     *
-     * @param charset The charset to use.
-     *
-     * @return The contents of the file, as a string.
-     *
-     * @throws UnsupportedEncodingException if the requested character
-     *                                      encoding is not available.
-     */
-    public String getString(final String charset)
-            throws UnsupportedEncodingException {
-        return new String(get(), charset);
-    }
-
-    /**
-     * Returns the contents of the file as a String, using the default
-     * character encoding.  This method uses {@link #get()} to retrieve the
-     * contents of the file.
-     *
-     * <b>TODO</b> Consider making this method throw UnsupportedEncodingException.
-     *
-     * @return The contents of the file, as a string.
-     */
-    public String getString() {
-        byte[] rawdata = get();
-        String charset = getCharSet();
-        if (charset == null) {
-            charset = defaultCharset;
-        }
-        try {
-            return new String(rawdata, charset);
-        } catch (UnsupportedEncodingException e) {
-            return new String(rawdata);
-        }
+        return Cryptography.decrypt(super.get(), key);
     }
 
     /**
@@ -387,41 +158,28 @@ public class EncryptedFileItem
      */
     public void write(File file) throws Exception {
         if (isInMemory()) {
-            FileOutputStream fout = null;
-            try {
-                fout = new FileOutputStream(file);
-                fout.write(get());
-                fout.close();
-            } finally {
-            	IOUtils.closeQuietly(fout);
-            }
+            super.write(file);
         } else {
-            File outputFile = getStoreLocation();
-            if (outputFile != null) {
-                // Save the length of the file
-                size = outputFile.length() - Cryptography.IninialisationVectorSize();
-                /*
-                 * The uploaded file is being stored encrypted on disk
-                 * in a temporary location so must be decrypted into the
-                 * desired file.
-                 */
-                InputStream in = null;
-                OutputStream out = null;
-                try {
-                    in = Cryptography.decrypt(new FileInputStream(outputFile), key);
-                    out = new FileOutputStream(file);
-                    IOUtils.copy(in, out);
-                } finally {
-                    IOUtils.closeQuietly(in);
-                    IOUtils.closeQuietly(out);
-                }
-            } else {
-                /*
-                 * For whatever reason we cannot write the
-                 * file to disk.
-                 */
-                throw new FileUploadException(
-                        "Cannot write uploaded file to disk!");
+            // DiskFileItem caches the size of the file at this point
+            // because it then attempts to move the file to the destination.
+            // In this implementation, the file will always need decrypting
+            // so the original file won't be moved.
+            // Therefore we can safely not cache the size (which is a private
+            // field in the superclass, so that minimises changes).
+            /*
+             * The uploaded file is being stored encrypted on disk
+             * in a temporary location so must be decrypted into the
+             * desired file.
+             */
+            InputStream in = null;
+            OutputStream out = null;
+            try {
+                in = getInputStream();
+                out = new FileOutputStream(file);
+                IOUtils.copy(in, out);
+            } finally {
+                IOUtils.closeQuietly(in);
+                IOUtils.closeQuietly(out);
             }
         }
     }
@@ -434,64 +192,11 @@ public class EncryptedFileItem
      * earlier time, thus preserving system resources.
      */
     public void delete() {
-        cachedContent = null;
-        File outputFile = getStoreLocation();
+        super.clearCachedContent();
+        File outputFile = super.getStoreLocation();
         if (outputFile != null && !isInMemory() && outputFile.exists()) {
             outputFile.delete();
         }
-    }
-
-    /**
-     * Returns the name of the field in the multipart form corresponding to
-     * this file item.
-     *
-     * @return The name of the form field.
-     *
-     * @see #setFieldName(java.lang.String)
-     *
-     */
-    public String getFieldName() {
-        return fieldName;
-    }
-
-    /**
-     * Sets the field name used to reference this file item.
-     *
-     * @param fieldName The name of the form field.
-     *
-     * @see #getFieldName()
-     *
-     */
-    public void setFieldName(String fieldName) {
-        this.fieldName = fieldName;
-    }
-
-    /**
-     * Determines whether or not a <code>FileItem</code> instance represents
-     * a simple form field.
-     *
-     * @return <code>true</code> if the instance represents a simple form
-     * field; <code>false</code> if it represents an uploaded file.
-     *
-     * @see #setFormField(boolean)
-     *
-     */
-    public boolean isFormField() {
-        return isFormField;
-    }
-
-    /**
-     * Specifies whether or not a <code>FileItem</code> instance represents
-     * a simple form field.
-     *
-     * @param state <code>true</code> if the instance represents a simple form
-     *              field; <code>false</code> if it represents an uploaded file.
-     *
-     * @see #isFormField()
-     *
-     */
-    public void setFormField(boolean state) {
-        isFormField = state;
     }
 
     /**
@@ -505,149 +210,51 @@ public class EncryptedFileItem
      */
     public OutputStream getOutputStream()
             throws IOException {
-        if (dfos == null) {
-            File outputFile = getTempFile();
-            dfos = new DeferredFileOutputStream(sizeThreshold, outputFile);
-        }
-        return dfos;
+        return Cryptography.encrypt(super.getOutputStream(), key);
     }
 
     // --------------------------------------------------------- Public methods
 
     /**
-     * Returns the {@link java.io.File} object for the <code>FileItem</code>'s
-     * data's temporary location on the disk. Note that for
-     * <code>FileItem</code>s that have their data stored in memory,
-     * this method will return <code>null</code>. When handling large
-     * files, you can use {@link java.io.File#renameTo(java.io.File)} to
-     * move the file to new location without copying the data, if the
-     * source and destination locations reside within the same logical
-     * volume.
-     * <p>
-     * NB the returned file is the raw, encrypted file, so the EncryptedFileItem
-     * implemetation differs from the DiskFileItem implementation by making this
-     * method protected. This enables subclasses to access it, whilst avoiding
-     * unintended usage via the public API.
+     * EncryptedFileItem doesn't support getting the temp file.
+     * This is because the raw file is encrypted, so a simple File.renameTo(...) won't work.
+     * This exception is here to avoid getting unexpected results if you call this method.
+     * Please use getInputStream() instead. If you know what you're doing, you can call the
+     * super method explicitly to get access to the encrypted file.
      *
-     * @return The data file, or <code>null</code> if the data is stored in
-     * memory.
+     * @return This method won't allow you to call it, because you might not be expecting the result.
+     * @throws UnsupportedOperationException Because the returned file would be encrypted data.
      */
-    protected File getStoreLocation() {
-        if (dfos == null) {
-            return null;
-        }
-        if (isInMemory()) {
-        	return null;
-        }
-        return dfos.getFile();
-    }
-
-    // ------------------------------------------------------ Protected methods
-
-    /**
-     * Removes the file contents from the temporary storage.
-     */
-    @Override
-    protected void finalize() {
-        if (dfos == null || dfos.isInMemory()) {
-            return;
-        }
-        File outputFile = dfos.getFile();
-
-        if (outputFile != null && outputFile.exists()) {
-            outputFile.delete();
-        }
+    public File getStoreLocation() {
+        throw new UnsupportedOperationException("EncryptedFileItem doesn't support getting the temp file." +
+                "This is because the raw file is encrypted, so a simple File.renameTo(...) won't work." +
+                "This exception is here to avoid getting unexpected results if you call this method." +
+                "Please use getInputStream() instead. If you know what you're doing, you can call the " +
+                "super method explicitly");
     }
 
     /**
-     * Creates and returns a {@link java.io.File File} representing a uniquely
-     * named temporary file in the configured repository path. The lifetime of
-     * the file is tied to the lifetime of the <code>FileItem</code> instance;
-     * the file will be deleted when the instance is garbage collected.
-     * <p>
-     * <b>Note: Subclasses that override this method must ensure that they return the
-     * same File each time.</b>
+     * This override provides access to the protected superclass method for
+     * the benefit of {@link EncryptedFileItemFactory}.
      *
      * @return The {@link java.io.File File} to be used for temporary storage.
      */
     protected File getTempFile() {
-        if (tempFile == null) {
-            File tempDir = repository;
-            if (tempDir == null) {
-                tempDir = new File(System.getProperty("java.io.tmpdir"));
-            }
-
-            String tempFileName = format("upload_%s_%s.tmp", UID, getUniqueId());
-
-            tempFile = new File(tempDir, tempFileName);
-        }
-        return tempFile;
-    }
-
-    // -------------------------------------------------------- Private methods
-
-    /**
-     * Returns an identifier that is unique within the class loader used to
-     * load this class, but does not have random-like appearance.
-     *
-     * @return A String with the non-random looking instance identifier.
-     */
-    private static String getUniqueId() {
-        final int limit = 100000000;
-        int current = COUNTER.getAndIncrement();
-        String id = Integer.toString(current);
-
-        // If you manage to get more than 100 million of ids, you'll
-        // start getting ids longer than 8 characters.
-        if (current < limit) {
-            id = ("00000000" + id).substring(id.length());
-        }
-        return id;
+        return super.getTempFile();
     }
 
     /**
      * Returns a string representation of this object.
+     *
+     * This preserves the behaviour of the superclass implementation, but avoids calling the public
+     * getStoreLocation, which would require creating a decrypted copy of the file.
      *
      * @return a string representation of this object.
      */
     @Override
     public String toString() {
         return format("name=%s, StoreLocation=%s, size=%s bytes, isFormField=%s, FieldName=%s",
-                getName(), getStoreLocation(), Long.valueOf(getSize()),
+                getName(), super.getStoreLocation(), Long.valueOf(getSize()),
                 Boolean.valueOf(isFormField()), getFieldName());
-    }
-
-    /**
-     * Returns the file item headers.
-     * @return The file items headers.
-     */
-    public FileItemHeaders getHeaders() {
-        return headers;
-    }
-
-    /**
-     * Sets the file item headers.
-     * @param pHeaders The file items headers.
-     */
-    public void setHeaders(FileItemHeaders pHeaders) {
-        headers = pHeaders;
-    }
-
-    /**
-     * Returns the default charset for use when no explicit charset
-     * parameter is provided by the sender.
-     * @return the default charset
-     */
-    public String getDefaultCharset() {
-        return defaultCharset;
-    }
-
-    /**
-     * Sets the default charset for use when no explicit charset
-     * parameter is provided by the sender.
-     * @param charset the default charset
-     */
-    public void setDefaultCharset(String charset) {
-        defaultCharset = charset;
     }
 }

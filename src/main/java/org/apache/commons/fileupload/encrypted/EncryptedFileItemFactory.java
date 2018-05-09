@@ -1,15 +1,30 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.commons.fileupload.encrypted;
-
-import org.apache.commons.fileupload.FileItem;
-import org.apache.commons.fileupload.FileItemFactory;
-import org.apache.commons.fileupload.disk.DiskFileItem;
-import org.apache.commons.io.FileCleaningTracker;
 
 import java.io.File;
 
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.disk.DiskFileItemFactory;
+import org.apache.commons.io.FileCleaningTracker;
+
 /**
  * <p>A {@link org.apache.commons.fileupload.FileItemFactory}
- * implementation providing transparent encryption of uploaded data.
+ * extension that provides transparent encryption of uploaded data.
  * This implementation creates encrypted
  * {@link org.apache.commons.fileupload.FileItem} instances which keep their
  * content either in memory, for smaller items, or in a temporary file on disk,
@@ -58,48 +73,14 @@ import java.io.File;
  *
  * @since FileUpload 1.4
  */
-public class EncryptedFileItemFactory implements FileItemFactory {
-
-    // ----------------------------------------------------- Manifest constants
-
-    /**
-     * The default threshold above which uploads will be stored on disk.
-     */
-    public static final int DEFAULT_SIZE_THRESHOLD = 10240;
-
-    // ----------------------------------------------------- Instance Variables
-
-    /**
-     * The directory in which uploaded files will be stored, if stored on disk.
-     */
-    private File repository;
-
-    /**
-     * The threshold above which uploads will be stored on disk.
-     */
-    private int sizeThreshold = DEFAULT_SIZE_THRESHOLD;
-
-    /**
-     * <p>The instance of {@link FileCleaningTracker}, which is responsible
-     * for deleting temporary files.</p>
-     * <p>May be null, if tracking files is not required.</p>
-     */
-    private FileCleaningTracker fileCleaningTracker;
-
-    /**
-     * Default content charset to be used when no explicit charset
-     * parameter is provided by the sender.
-     */
-    private String defaultCharset = EncryptedFileItem.DEFAULT_CHARSET;
-
-    // ----------------------------------------------------------- Constructors
+public class EncryptedFileItemFactory extends DiskFileItemFactory {
 
     /**
      * Constructs an unconfigured instance of this class. The resulting factory
      * may be configured by calling the appropriate setter methods.
      */
     public EncryptedFileItemFactory() {
-        this(DEFAULT_SIZE_THRESHOLD, null);
+        super(DEFAULT_SIZE_THRESHOLD, null);
     }
 
     /**
@@ -113,63 +94,8 @@ public class EncryptedFileItemFactory implements FileItemFactory {
      *                      exceed the threshold.
      */
     public EncryptedFileItemFactory(int sizeThreshold, File repository) {
-        this.sizeThreshold = sizeThreshold;
-        this.repository = repository;
+        super(sizeThreshold, repository);
     }
-
-    // ------------------------------------------------------------- Properties
-
-    /**
-     * Returns the directory used to temporarily store files that are larger
-     * than the configured size threshold.
-     *
-     * @return The directory in which temporary files will be located.
-     *
-     * @see #setRepository(java.io.File)
-     *
-     */
-    public File getRepository() {
-        return repository;
-    }
-
-    /**
-     * Sets the directory used to temporarily store files that are larger
-     * than the configured size threshold.
-     *
-     * @param repository The directory in which temporary files will be located.
-     *
-     * @see #getRepository()
-     *
-     */
-    public void setRepository(File repository) {
-        this.repository = repository;
-    }
-
-    /**
-     * Returns the size threshold beyond which files are written directly to
-     * disk. The default value is 10240 bytes.
-     *
-     * @return The size threshold, in bytes.
-     *
-     * @see #setSizeThreshold(int)
-     */
-    public int getSizeThreshold() {
-        return sizeThreshold;
-    }
-
-    /**
-     * Sets the size threshold beyond which files are written directly to disk.
-     *
-     * @param sizeThreshold The size threshold, in bytes.
-     *
-     * @see #getSizeThreshold()
-     *
-     */
-    public void setSizeThreshold(int sizeThreshold) {
-        this.sizeThreshold = sizeThreshold;
-    }
-
-    // --------------------------------------------------------- Public Methods
 
     /**
      * Create a new {@link org.apache.commons.fileupload.disk.DiskFileItem}
@@ -188,53 +114,12 @@ public class EncryptedFileItemFactory implements FileItemFactory {
     public FileItem createItem(String fieldName, String contentType,
                                boolean isFormField, String fileName) {
         EncryptedFileItem result = new EncryptedFileItem(fieldName, contentType,
-                isFormField, fileName, sizeThreshold, repository);
-        result.setDefaultCharset(defaultCharset);
+                isFormField, fileName, getSizeThreshold(), getRepository());
+        result.setDefaultCharset(getDefaultCharset());
         FileCleaningTracker tracker = getFileCleaningTracker();
         if (tracker != null) {
             tracker.track(result.getTempFile(), result);
         }
         return result;
-    }
-
-    /**
-     * Returns the tracker, which is responsible for deleting temporary
-     * files.
-     *
-     * @return An instance of {@link FileCleaningTracker}, or null
-     * (default), if temporary files aren't tracked.
-     */
-    public FileCleaningTracker getFileCleaningTracker() {
-        return fileCleaningTracker;
-    }
-
-    /**
-     * Sets the tracker, which is responsible for deleting temporary
-     * files.
-     *
-     * @param pTracker An instance of {@link FileCleaningTracker},
-     *                 which will from now on track the created files, or null
-     *                 (default), to disable tracking.
-     */
-    public void setFileCleaningTracker(FileCleaningTracker pTracker) {
-        fileCleaningTracker = pTracker;
-    }
-
-    /**
-     * Returns the default charset for use when no explicit charset
-     * parameter is provided by the sender.
-     * @return the default charset
-     */
-    public String getDefaultCharset() {
-        return defaultCharset;
-    }
-
-    /**
-     * Sets the default charset for use when no explicit charset
-     * parameter is provided by the sender.
-     * @param pCharset the default charset
-     */
-    public void setDefaultCharset(String pCharset) {
-        defaultCharset = pCharset;
     }
 }
