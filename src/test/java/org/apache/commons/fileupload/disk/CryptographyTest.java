@@ -1,4 +1,4 @@
-package org.apache.commons.fileupload.encrypted;
+package org.apache.commons.fileupload.disk;
 
 import org.apache.commons.io.IOUtils;
 import org.junit.After;
